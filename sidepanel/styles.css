@@ -192,6 +192,43 @@ body {
   color: #666;
 }
 
+/* --- Setup prompt (shown on first connect when host missing) --- */
+
+.setup-prompt {
+  background: #16213e;
+  border: 1px solid #e94560;
+  border-radius: 8px;
+  padding: 14px 16px;
+  font-size: 13px;
+  color: #aaa;
+  line-height: 1.6;
+}
+.setup-prompt p {
+  margin: 6px 0;
+}
+.setup-cmd {
+  background: #0a0a1a;
+  border: 1px solid #0f3460;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+  font-size: 13px;
+  color: #8cf;
+  margin: 8px 0;
+  user-select: all;
+}
+.setup-copy {
+  padding: 5px 12px;
+  background: #e94560;
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.setup-copy:hover { background: #c73850; }
+
 .action-tag {
   display: inline-block;
   background: #0a2040;

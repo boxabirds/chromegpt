@@ -43,6 +43,9 @@ function connectPort() {
         addMessage('error', msg.error);
         setStreaming(false);
         break;
+      case 'setupRequired':
+        showSetupPrompt();
+        break;
       case 'toolCall':
         showToolCall(msg.tool, msg.args);
         break;
@@ -54,6 +57,8 @@ function connectPort() {
   });
 
   port.postMessage({ type: 'getConfig' });
+  // Auto-connect when side panel opens
+  port.postMessage({ type: 'connect' });
 }
 
 connectPort();
@@ -174,6 +179,53 @@ function formatToolArgs(tool, args) {
   if (args.url) return args.url;
   if (args.direction) return `${args.direction} ${args.pixels || 500}px`;
   return '';
+}
+
+// ---------------------------------------------------------------------------
+// First-run setup prompt
+// ---------------------------------------------------------------------------
+
+function showSetupPrompt() {
+  // Hide the default setup guide
+  const guide = document.getElementById('setup-guide');
+  if (guide) guide.classList.add('hidden');
+
+  // Get the install command with the absolute path
+  const extensionUrl = chrome.runtime.getURL('install-host.sh');
+  // chrome-extension://id/install-host.sh → extract the file path
+  // For load-unpacked, the actual path is the extension directory
+  const extDir = chrome.runtime.getURL('').replace('chrome-extension://', '').replace(/\/$/, '');
+
+  const el = document.createElement('div');
+  el.className = 'setup-prompt';
+  el.innerHTML = `
+    <div class="setup-title">One-time setup</div>
+    <p>Run this in your terminal, then restart Chrome:</p>
+    <div class="setup-cmd" id="setup-cmd"></div>
+    <button class="setup-copy" id="copy-cmd">Copy</button>
+    <p class="setup-hint">This registers the native messaging bridge so Chrome can launch the Codex agent.</p>
+  `;
+  messagesEl.appendChild(el);
+
+  // We need the real filesystem path. For load-unpacked extensions,
+  // chrome.runtime.getURL gives us the extension URL, not the filesystem path.
+  // The install-host.sh is in the extension directory, which the user knows.
+  const cmdEl = el.querySelector('#setup-cmd');
+  cmdEl.textContent = chrome.runtime.getURL('install-host.sh')
+    .replace(/^chrome-extension:\/\/[^/]+/, '.');
+
+  // Actually, we can't know the absolute path from inside the extension.
+  // Show a relative hint instead.
+  cmdEl.textContent = './install-host.sh';
+
+  el.querySelector('#copy-cmd').addEventListener('click', () => {
+    navigator.clipboard.writeText('./install-host.sh').then(() => {
+      el.querySelector('#copy-cmd').textContent = 'Copied!';
+      setTimeout(() => { el.querySelector('#copy-cmd').textContent = 'Copy'; }, 2000);
+    });
+  });
+
+  scrollToBottom();
 }
 
 function escapeHtml(str) {

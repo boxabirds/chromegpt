@@ -218,12 +218,11 @@ function connect() {
     broadcastState();
 
     if (err) {
-      sendToPanel({
-        type: 'error',
-        error: err.includes('not found')
-          ? 'Native host not found. Run: ./install-host.sh <extension-id>'
-          : `Connection lost: ${err}`,
-      });
+      if (err.includes('not found') || err.includes('Specified native messaging host not found')) {
+        sendToPanel({ type: 'setupRequired' });
+      } else {
+        sendToPanel({ type: 'error', error: `Connection lost: ${err}` });
+      }
     }
   });
 
