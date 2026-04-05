@@ -21,23 +21,14 @@ The Codex app-server [unconditionally rejects](https://github.com/openai/codex/b
 ## Setup
 
 ```bash
-# 1. Install Codex CLI
 npm install -g @openai/codex
-
-# 2. Log in
 codex login
-
-# 3. Load the extension in Chrome
-#    chrome://extensions → Developer Mode → Load unpacked → select this directory
-#    Note the extension ID shown under the extension name
-
-# 4. Install the native messaging host (one-time, needs your extension ID)
-./install-host.sh <extension-id>
-
-# 5. Restart Chrome
+# chrome://extensions → Developer Mode → Load unpacked → this directory
+./install-host.sh
+# Restart Chrome
 ```
 
-After restarting Chrome, click the ChromeGPT icon to open the side panel. Click "Connect" — the extension spawns the Codex app-server automatically.
+Click the ChromeGPT icon to open the side panel. Click "Connect" — the extension spawns the Codex app-server automatically.
 
 ## Browser tools
 

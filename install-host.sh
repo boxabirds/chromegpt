@@ -2,26 +2,10 @@
 set -e
 
 # Install the ChromeGPT native messaging host manifest.
-# Run once after loading the extension in Chrome.
-#
-# Usage: ./install-host.sh <chrome-extension-id>
-#
-# Find your extension ID at chrome://extensions (enable Developer Mode).
+# One-time setup — run after loading the extension in Chrome.
 
-if [ -z "$1" ]; then
-  echo "Usage: ./install-host.sh <chrome-extension-id>"
-  echo ""
-  echo "Steps:"
-  echo "  1. Go to chrome://extensions"
-  echo "  2. Enable Developer Mode"
-  echo "  3. Load the extension (Load unpacked → this directory)"
-  echo "  4. Copy the extension ID shown under the extension name"
-  echo "  5. Run: ./install-host.sh <that-id>"
-  exit 1
-fi
-
-EXT_ID="$1"
 HOST_NAME="com.chromegpt.bridge"
+EXT_ID="hgkbnnohieahaecookipomahikkmbhli"
 BRIDGE_PATH="$(cd "$(dirname "$0")" && pwd)/bridge.js"
 
 # Detect OS and set manifest directory
@@ -33,8 +17,7 @@ case "$(uname -s)" in
     MANIFEST_DIR="$HOME/.config/google-chrome/NativeMessagingHosts"
     ;;
   *)
-    echo "Unsupported OS. Manually create the native messaging host manifest."
-    echo "See: https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging"
+    echo "Unsupported OS. See: https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging"
     exit 1
     ;;
 esac
@@ -57,6 +40,5 @@ echo "Installed native messaging host."
 echo ""
 echo "  Manifest: $MANIFEST_DIR/$HOST_NAME.json"
 echo "  Bridge:   $BRIDGE_PATH"
-echo "  Extension: $EXT_ID"
 echo ""
-echo "Restart Chrome for the change to take effect."
+echo "Restart Chrome, then click Connect in the side panel."

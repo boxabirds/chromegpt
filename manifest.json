@@ -3,6 +3,7 @@
   "name": "ChromeGPT",
   "version": "0.1.0",
   "description": "AI browser assistant powered by Codex app-server",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0Q4FVpJw6+3oWLmSV2T7sp6nZN1gDu5a2QBJgWfhyWO6e2kqDn/9EHUn7E7xgg6WxDzCSww9L9C0vosvjcxTvVVT7UdYYpUUA2zIvfnc0NteGFevF7/yKn1qv6TuC+MphE4wKx5ugSC0XA5iML23bY/DkQfUNIm9vG0MEs5a/3x+rn5I/3WRcS1o7y64ZbvZk6ICQRKzn+Qc/A4GV9JNgQljMNFidL3dnqmFdDzmeufCht4wsWg95uK3jHiCD7LfOJasjGV9y6ETxcqZGxoyc4c9NyR1aiOds5/OdLnDIATTUkp39WUB2SW5URJ51BBxNJnaUNQTuACbFTtrjSrvhQIDAQAB",
   "permissions": [
     "sidePanel",
     "activeTab",
