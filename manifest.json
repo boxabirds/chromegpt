@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "ChromeGPT",
+  "version": "0.1.0",
+  "description": "AI browser assistant powered by Codex app-server",
+  "permissions": [
+    "sidePanel",
+    "activeTab",
+    "tabs",
+    "storage",
+    "debugger"
+  ],
+  "side_panel": {
+    "default_path": "sidepanel/index.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "ChromeGPT"
+  }
+}
