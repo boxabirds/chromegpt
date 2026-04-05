@@ -16,10 +16,6 @@
 
     <div id="settings-panel" class="hidden">
       <label>
-        WebSocket URL
-        <input type="text" id="ws-url" placeholder="ws://127.0.0.1:4501">
-      </label>
-      <label>
         Model
         <input type="text" id="model" placeholder="o3">
       </label>
@@ -36,8 +32,8 @@
         <ol>
           <li>Install Codex CLI<br><code>npm install -g @openai/codex</code></li>
           <li>Log in<br><code>codex login</code></li>
-          <li>Start the app-server<br><code>codex app-server --listen ws://127.0.0.1:4500</code></li>
-          <li>Start the proxy (strips Origin header)<br><code>node proxy.js</code></li>
+          <li>Install native host<br><code>./install-host.sh &lt;extension-id&gt;</code></li>
+          <li>Restart Chrome, then click Connect</li>
         </ol>
         <div class="setup-hint">Status will turn green when connected.</div>
       </div>

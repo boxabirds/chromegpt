@@ -6,7 +6,6 @@ const sendBtn       = document.getElementById('send-btn');
 const statusEl      = document.getElementById('status');
 const settingsBtn   = document.getElementById('settings-btn');
 const settingsPanel = document.getElementById('settings-panel');
-const wsUrlInput    = document.getElementById('ws-url');
 const modelInput    = document.getElementById('model');
 const saveBtn       = document.getElementById('save-settings');
 const connectBtn    = document.getElementById('connect-btn');
@@ -29,7 +28,6 @@ function connectPort() {
         setConnectionState(msg.state);
         break;
       case 'config':
-        wsUrlInput.value = msg.config.wsUrl || '';
         modelInput.value = msg.config.model || '';
         break;
       case 'turnStart':
@@ -75,7 +73,6 @@ function setConnectionState(state) {
   statusEl.className = state;
   statusEl.textContent = STATE_LABELS[state] || state;
 
-  // Hide setup guide once connected, show it when disconnected/error
   const guide = document.getElementById('setup-guide');
   if (guide) {
     guide.classList.toggle('hidden', state === 'connected');
@@ -133,7 +130,7 @@ function finishAssistantMessage() {
 }
 
 // ---------------------------------------------------------------------------
-// Tool-call display — shows agent actions in the chat
+// Tool-call display
 // ---------------------------------------------------------------------------
 
 const TOOL_LABELS = {
@@ -148,7 +145,6 @@ const TOOL_LABELS = {
 };
 
 function showToolCall(tool, args) {
-  // Finish any in-progress assistant bubble so the tool tag appears between text
   if (currentAssistantEl) {
     const cursor = currentAssistantEl.querySelector('.cursor');
     if (cursor) cursor.remove();
@@ -165,7 +161,6 @@ function showToolCall(tool, args) {
   messagesEl.appendChild(el);
   scrollToBottom();
 
-  // Re-open an assistant bubble for any text that follows
   startAssistantMessage();
 }
 
@@ -225,7 +220,6 @@ settingsBtn.addEventListener('click', () => {
 
 saveBtn.addEventListener('click', () => {
   const cfg = {};
-  if (wsUrlInput.value) cfg.wsUrl = wsUrlInput.value;
   if (modelInput.value) cfg.model = modelInput.value;
   port.postMessage({ type: 'updateConfig', config: cfg });
   settingsPanel.classList.add('hidden');

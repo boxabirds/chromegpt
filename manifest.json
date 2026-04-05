@@ -8,7 +8,8 @@
     "activeTab",
     "tabs",
     "storage",
-    "debugger"
+    "debugger",
+    "nativeMessaging"
   ],
   "side_panel": {
     "default_path": "sidepanel/index.html"

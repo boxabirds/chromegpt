@@ -1,25 +1,21 @@
 // ChromeGPT Background Service Worker
-// Connects to Codex app-server and exposes CDP browser tools as dynamic tools.
-// The agent drives an iterative tool-use loop — extract page, click, type,
-// navigate — just like Claude Code does with filesystem tools.
+// Connects to Codex app-server via native messaging (stdio) and exposes
+// CDP browser operations as dynamic tools for the agent to drive.
 
 importScripts('cdp.js');
 
-const DEFAULT_WS_URL = 'ws://127.0.0.1:4501';
+const NATIVE_HOST = 'com.chromegpt.bridge';
 const DEFAULT_MODEL = 'o3';
-const MAX_RECONNECT_ATTEMPTS = 5;
-const RECONNECT_DELAYS_MS = [1000, 2000, 4000, 8000, 16000];
 
-let ws = null;
+let nativePort = null;
 let rpcId = 0;
 let pendingRequests = new Map(); // id -> {resolve, reject}
 let connectionState = 'disconnected';
-let reconnectAttempt = 0;
 let threads = new Map(); // tabId -> threadId
-let activePort = null;
-let config = { wsUrl: DEFAULT_WS_URL, model: DEFAULT_MODEL };
+let sidePanel = null;
+let config = { model: DEFAULT_MODEL };
 let currentTurnText = '';
-let currentTabId = null; // tab the current turn operates on
+let currentTabId = null;
 
 // ---------------------------------------------------------------------------
 // Dynamic tool definitions — registered with Codex so the agent can call them
@@ -122,7 +118,7 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 chrome.runtime.onConnect.addListener((port) => {
   if (port.name !== 'sidepanel') return;
 
-  activePort = port;
+  sidePanel = port;
   port.postMessage({ type: 'connectionState', state: connectionState });
 
   port.onMessage.addListener(async (msg) => {
@@ -131,8 +127,7 @@ chrome.runtime.onConnect.addListener((port) => {
         await handleAsk(msg.question, msg.tabId);
         break;
       case 'connect':
-        reconnectAttempt = 0;
-        await connect();
+        connect();
         break;
       case 'disconnect':
         disconnect();
@@ -151,17 +146,14 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 
   port.onDisconnect.addListener(() => {
-    activePort = null;
+    sidePanel = null;
   });
 });
 
-// Load saved config and auto-connect
 chrome.storage.local.get('config', (result) => {
   if (result.config) config = { ...config, ...result.config };
-  connect();
 });
 
-// Clean up when tabs close
 chrome.tabs.onRemoved.addListener((tabId) => {
   threads.delete(tabId);
   cdpDetach(tabId);
@@ -172,8 +164,8 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 // ---------------------------------------------------------------------------
 
 function sendToPanel(msg) {
-  if (!activePort) return;
-  try { activePort.postMessage(msg); } catch (_) { /* port closed */ }
+  if (!sidePanel) return;
+  try { sidePanel.postMessage(msg); } catch (_) { /* port closed */ }
 }
 
 function broadcastState() {
@@ -181,95 +173,99 @@ function broadcastState() {
 }
 
 // ---------------------------------------------------------------------------
-// WebSocket / JSON-RPC 2.0
+// Native messaging transport (replaces WebSocket)
 // ---------------------------------------------------------------------------
 
-async function connect() {
-  if (ws && ws.readyState === WebSocket.OPEN) return;
+function connect() {
+  if (nativePort) return; // already connected
 
   connectionState = 'connecting';
   broadcastState();
 
   try {
-    ws = new WebSocket(config.wsUrl);
-
-    ws.onopen = async () => {
-      reconnectAttempt = 0;
-      connectionState = 'connected';
-      broadcastState();
-      await initialize();
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        handleRpcMessage(JSON.parse(event.data));
-      } catch (_) {
-        for (const line of event.data.split('\n').filter(Boolean)) {
-          try { handleRpcMessage(JSON.parse(line)); }
-          catch (e) { console.error('[chromegpt] bad RPC line', e, line); }
-        }
-      }
-    };
-
-    ws.onclose = () => {
-      ws = null;
-      const wasConnected = connectionState === 'connected';
-      connectionState = 'disconnected';
-      broadcastState();
-      if (wasConnected) scheduleReconnect();
-    };
-
-    ws.onerror = () => {
-      connectionState = 'error';
-      broadcastState();
-      sendToPanel({
-        type: 'error',
-        error: `Cannot reach app-server at ${config.wsUrl}`,
-      });
-    };
-  } catch (_) {
+    nativePort = chrome.runtime.connectNative(NATIVE_HOST);
+  } catch (e) {
     connectionState = 'error';
     broadcastState();
-    scheduleReconnect();
+    sendToPanel({ type: 'error', error: `Failed to launch native host: ${e.message}` });
+    return;
   }
+
+  nativePort.onMessage.addListener((msg) => {
+    // First message might be an error from the bridge
+    if (msg.error && connectionState !== 'connected') {
+      connectionState = 'error';
+      broadcastState();
+      sendToPanel({ type: 'error', error: msg.error });
+      return;
+    }
+
+    // Mark connected on first successful RPC response
+    if (connectionState !== 'connected') {
+      connectionState = 'connected';
+      broadcastState();
+    }
+
+    handleRpcMessage(msg);
+  });
+
+  nativePort.onDisconnect.addListener(() => {
+    const err = chrome.runtime.lastError?.message || '';
+    nativePort = null;
+    pendingRequests.forEach(({ reject }) => reject(new Error('Disconnected')));
+    pendingRequests.clear();
+    connectionState = 'disconnected';
+    broadcastState();
+
+    if (err) {
+      sendToPanel({
+        type: 'error',
+        error: err.includes('not found')
+          ? 'Native host not found. Run: ./install-host.sh <extension-id>'
+          : `Connection lost: ${err}`,
+      });
+    }
+  });
+
+  // Kick off the JSON-RPC handshake
+  initialize();
 }
 
 function disconnect() {
-  reconnectAttempt = MAX_RECONNECT_ATTEMPTS;
-  if (ws) ws.close();
-  ws = null;
+  if (nativePort) {
+    nativePort.disconnect();
+    nativePort = null;
+  }
   pendingRequests.forEach(({ reject }) => reject(new Error('Disconnected')));
   pendingRequests.clear();
   connectionState = 'disconnected';
   broadcastState();
 }
 
-function scheduleReconnect() {
-  if (reconnectAttempt >= MAX_RECONNECT_ATTEMPTS) return;
-  const delay = RECONNECT_DELAYS_MS[reconnectAttempt++];
-  setTimeout(() => connect(), delay);
-}
+// ---------------------------------------------------------------------------
+// JSON-RPC 2.0 (same protocol, different transport)
+// ---------------------------------------------------------------------------
 
 function sendRpc(method, params) {
   return new Promise((resolve, reject) => {
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      reject(new Error('Not connected to Codex app-server'));
+    if (!nativePort) {
+      reject(new Error('Not connected to Codex'));
       return;
     }
     const id = rpcId++;
     pendingRequests.set(id, { resolve, reject });
-    ws.send(JSON.stringify({ jsonrpc: '2.0', method, id, params }));
+    nativePort.postMessage({ jsonrpc: '2.0', method, id, params });
   });
 }
 
 function sendRpcNotification(method, params) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({ jsonrpc: '2.0', method, params }));
+  if (!nativePort) return;
+  nativePort.postMessage({ jsonrpc: '2.0', method, params });
 }
 
 function respondToServer(id, result) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({ jsonrpc: '2.0', id, result }));
+  if (!nativePort) return;
+  nativePort.postMessage({ jsonrpc: '2.0', id, result });
 }
 
 function handleRpcMessage(msg) {
@@ -296,11 +292,19 @@ function handleRpcMessage(msg) {
 // ---------------------------------------------------------------------------
 
 async function initialize() {
-  await sendRpc('initialize', {
-    clientInfo: { name: 'chromegpt', title: 'ChromeGPT', version: '0.2.0' },
-    capabilities: { experimentalApi: true },
-  });
-  sendRpcNotification('initialized');
+  try {
+    await sendRpc('initialize', {
+      clientInfo: { name: 'chromegpt', title: 'ChromeGPT', version: '0.3.0' },
+      capabilities: { experimentalApi: true },
+    });
+    sendRpcNotification('initialized');
+    connectionState = 'connected';
+    broadcastState();
+  } catch (e) {
+    connectionState = 'error';
+    broadcastState();
+    sendToPanel({ type: 'error', error: `Handshake failed: ${e.message}` });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -328,19 +332,19 @@ async function getOrCreateThread(tabId) {
 
 async function handleAsk(question, tabId) {
   try {
-    if (connectionState !== 'connected') {
-      await connect();
+    if (!nativePort) {
+      connect();
+      // Give the handshake a moment
       await new Promise((r) => setTimeout(r, 1500));
       if (connectionState !== 'connected') {
         sendToPanel({
           type: 'error',
-          error: 'Not connected. Run:\n  codex app-server --listen ws://127.0.0.1:4500',
+          error: 'Not connected. Check that the native host is installed.',
         });
         return;
       }
     }
 
-    // Attach debugger now so tools are ready when the agent calls them
     currentTabId = tabId;
     try {
       await ensureAttached(tabId);
@@ -352,8 +356,6 @@ async function handleAsk(question, tabId) {
     const threadId = await getOrCreateThread(tabId);
     currentTurnText = '';
 
-    // Give the agent the current URL for orientation — full extraction is
-    // left to the browser_extract_page tool so the agent controls when to read.
     const tab = await chrome.tabs.get(tabId);
     const input = [
       { type: 'text', text: `User is on: ${tab.url} ("${tab.title}")\n\n${question}` },
@@ -431,7 +433,7 @@ function handleServerRequest(id, method, params) {
 }
 
 // ---------------------------------------------------------------------------
-// Dynamic tool dispatcher — the agent calls these via the Codex protocol
+// Dynamic tool dispatcher
 // ---------------------------------------------------------------------------
 
 async function handleToolCall(rpcId, params) {

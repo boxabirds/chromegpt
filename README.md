@@ -1,33 +1,47 @@
 # ChromeGPT
 
-A Chrome Extension that connects to the [Codex app-server](https://developers.openai.com/codex/app-server) to browse, search, and interact with web pages using AI. The Codex agent drives an iterative tool-use loop — extracting page content via the accessibility tree, clicking links, filling forms, navigating — just like Claude Code does with filesystem tools, but for the browser.
-
-## Status: Blocked by Origin header rejection
-
-The Codex app-server unconditionally rejects any WebSocket connection that includes an `Origin` header ([source](https://github.com/openai/codex/blob/main/codex-rs/app-server/src/transport/websocket.rs)). Chrome extensions always send `Origin: chrome-extension://[id]` on WebSocket connections — there is no way to suppress it.
-
-**Until the app-server accepts connections with an `Origin` header (e.g. via an `--allow-origin` flag), this is a 3-component solution:**
-
-1. `codex app-server` — the AI backend
-2. `proxy.js` — a Node.js WebSocket proxy that strips the `Origin` header
-3. The Chrome extension itself
-
-This makes the setup impractical for casual use. A proper fix would be either:
-- OpenAI adding `--allow-origin` or `--ws-allow-browser` to the app-server
-- Switching to [Native Messaging](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging) to spawn the app-server over stdio (how VS Code connects), eliminating WebSocket entirely
+A Chrome Extension that connects to the [Codex app-server](https://developers.openai.com/codex/app-server) to browse, search, and interact with web pages using AI. The Codex agent drives an iterative tool-use loop — extracting page content via the accessibility tree, clicking links, filling forms, navigating — like how Claude Code works with filesystem tools, but for the browser.
 
 ## Architecture
 
 ```
-Chrome Extension (side panel UI)
-    ↕ chrome.debugger (CDP)
-    ↕ WebSocket JSON-RPC 2.0
-Node proxy (strips Origin header)
-    ↕ WebSocket
-Codex app-server (AI agent + tool loop)
+Chrome Extension (side panel UI + CDP browser control)
+    ↕ native messaging (length-prefixed JSON)
+bridge.js (protocol translation)
+    ↕ stdio (newline-delimited JSON)
+codex app-server (AI agent + tool loop)
 ```
 
-The extension registers browser operations as **dynamic tools** with the Codex agent:
+The extension spawns the Codex app-server automatically via Chrome's native messaging — no terminals, no servers to start manually.
+
+### Why native messaging instead of WebSocket?
+
+The Codex app-server [unconditionally rejects](https://github.com/openai/codex/blob/main/codex-rs/app-server/src/transport/websocket.rs) any WebSocket request with an `Origin` header. Chrome extensions always send `Origin: chrome-extension://[id]` — there is no way to suppress it. Native messaging (stdio) avoids HTTP entirely, which is also how the VS Code extension connects.
+
+## Setup
+
+```bash
+# 1. Install Codex CLI
+npm install -g @openai/codex
+
+# 2. Log in
+codex login
+
+# 3. Load the extension in Chrome
+#    chrome://extensions → Developer Mode → Load unpacked → select this directory
+#    Note the extension ID shown under the extension name
+
+# 4. Install the native messaging host (one-time, needs your extension ID)
+./install-host.sh <extension-id>
+
+# 5. Restart Chrome
+```
+
+After restarting Chrome, click the ChromeGPT icon to open the side panel. Click "Connect" — the extension spawns the Codex app-server automatically.
+
+## Browser tools
+
+The extension registers these as Codex [dynamic tools](https://developers.openai.com/codex/app-server) — the agent calls them iteratively to accomplish goals:
 
 | Tool | Description |
 |---|---|
@@ -40,60 +54,41 @@ The extension registers browser operations as **dynamic tools** with the Codex a
 | `browser_select` | Select a dropdown option |
 | `browser_screenshot` | Capture a viewport screenshot |
 
-The agent calls these iteratively to accomplish goals — e.g. "find the pricing page on this site" triggers: extract page → find nav links → click "Pricing" → extract new page → report findings.
-
-## Setup
-
-```bash
-# 1. Install Codex CLI
-npm install -g @openai/codex
-
-# 2. Log in
-codex login
-
-# 3. Start the app-server
-codex app-server --listen ws://127.0.0.1:4500
-
-# 4. Install proxy dependency and start proxy
-cd /path/to/chromegpt
-npm install ws
-node proxy.js
-
-# 5. Load extension
-# chrome://extensions → Developer Mode → Load unpacked → select this directory
-```
-
-The extension defaults to `ws://127.0.0.1:4501` (the proxy port). Configurable via the gear icon in the side panel.
+Example: "find the pricing page on this site" triggers the agent to: extract page → find nav links → click "Pricing" → extract new page → report findings.
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `manifest.json` | MV3 extension config — sidePanel, debugger, tabs permissions |
-| `background.js` | Service worker — WebSocket/JSON-RPC client, tool dispatcher |
-| `cdp.js` | Chrome DevTools Protocol — accessibility tree extraction, input simulation |
-| `proxy.js` | WebSocket proxy that strips the `Origin` header |
-| `sidepanel/` | Chat UI — streaming responses, tool-call display, settings |
+| `manifest.json` | MV3 extension — sidePanel, debugger, nativeMessaging |
+| `background.js` | Service worker — JSON-RPC client, tool dispatcher |
+| `cdp.js` | Chrome DevTools Protocol — accessibility tree, input simulation |
+| `bridge.js` | Native messaging host — bridges Chrome ↔ Codex stdio |
+| `install-host.sh` | One-time setup — installs the native messaging manifest |
+| `sidepanel/` | Chat UI — streaming responses, tool-call display |
 
 ## How it works
 
 1. User asks a question in the side panel
 2. Extension attaches to the tab via `chrome.debugger` (CDP)
-3. Question is sent to Codex via `turn/start`
+3. Question is sent to Codex via `turn/start` over the native messaging bridge
 4. The Codex agent calls browser tools iteratively:
-   - `browser_extract_page` → returns the accessibility tree (semantic roles, names, `[N]` IDs)
-   - `browser_click` → resolves `[N]` to a DOM node via `backendDOMNodeId`, dispatches real mouse events
+   - `browser_extract_page` → accessibility tree (semantic roles, names, `[N]` IDs)
+   - `browser_click` → resolves `[N]` via `backendDOMNodeId`, dispatches real mouse events
    - `browser_type` → clicks to focus, then `Input.insertText` (works with React/Vue)
-   - etc.
 5. Agent streams text responses between tool calls
 6. Side panel shows the conversation with inline tool-call indicators
 
 ## Notes
 
-- The yellow "ChromeGPT is debugging this tab" bar is expected — it's the CDP debugger attachment
-- One conversation thread per tab, preserved across questions
-- The accessibility tree is much more compact than raw DOM — uses semantic roles (button, link, heading) not HTML tags
-- CDP gives real browser control: actual mouse events, keyboard input, works through shadow DOM
+- The yellow "ChromeGPT is debugging this tab" bar is the CDP debugger — expected
+- One conversation thread per tab
+- The accessibility tree is much more compact than raw DOM — semantic roles, not HTML
+- CDP gives real browser control: mouse events, keyboard input, works through shadow DOM
+
+## Caveats
+
+The JSON-RPC protocol implementation (method names, param shapes, dynamic tools API) was built from documentation research, not tested against a running server. Expect debugging when first connecting. See the commit history for context.
 
 ## License
 
